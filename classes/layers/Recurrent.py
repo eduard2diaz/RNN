@@ -2,7 +2,7 @@ from classes.layers.Layer import Layer
 import numpy as np
 
 class Recurrent(Layer):
-    _LAST_SEQUENCE_AMOUNT = 5
+    _LAST_SEQUENCE_AMOUNT = 1
 
     def __init__(self, hidden_units, h_act_f, output_act_f, n_outputs = 1):
         """
@@ -18,8 +18,10 @@ class Recurrent(Layer):
         self.w_y = np.random.rand(hidden_units, n_outputs) * 2 - 1
         
     def cellForward(self, x, h_prev):
+        #h_next_act = f(x * w_x + h_prev * W_h + b_h)
         h_next = np.dot(x, self.w_x) +  np.dot(h_prev, self.W_h) + self.b_h
         h_next_activation = self.h_act_f[0](h_next)
+        #output = g(h_next * W_y + b_y)
         output = np.dot(h_next_activation, self.w_y) + self.b_y
         output_activation = self.output_act_f[0](output)
         return {
@@ -44,14 +46,28 @@ class Recurrent(Layer):
             for timestep in range(X[i].shape[0]):
                 x = X[i][timestep]
                 result = self.cellForward(x, h_prev)
-                temp_memory.append(result) 
+                temp_memory.append(result['h_prev']) 
                 h_prev = result['h_next_activation']
-            out[i] = temp_memory[-1]['output_activation']
+                if timestep == X[i].shape[0] -1 :
+                    out[i] = result['output_activation']
             memory.append(temp_memory)
         self.memory = memory
         return out
 
-    def cellBackward(self, da_next, a_next, h_prev, x):
+    def cellBackward(self, x, h_prev):
+        parameters = self.cellForward(x, h_prev)
+        h_next = parameters['h_next']
+        h_next_activation = parameters['h_next_activation']
+        output = parameters['output']
+        
+        db_y_t = self.output_act_f[1](output)
+        d_Wy_t = db_y_t * h_next_activation
+
+        db_h_t = self.h_act_f[1](h_next) * db_y_t
+        dw_x_t = np.dot(db_h_t, x.T)
+        dW_h_t = np.dot(db_h_t, h_prev.T)
+
+        """
         # compute the gradient of tanh with respect to a_next (≈1 line)
         d_activation_h = self.h_act_f[1](a_next) * da_next
 
@@ -66,47 +82,88 @@ class Recurrent(Layer):
         # compute the gradient with respect to b (≈1 line)
         dbh = np.sum(d_activation_h, 1, keepdims=True)
 
+        """
         # Store the gradients in a python dictionary
-        gradients = {"dxt": dxt, "da_prev": da_prev, "dWx": dWx, "dWh": dWh, "dbh": dbh}
+        gradients = {"dW_h_t": dW_h_t, "dw_x_t": dw_x_t, "db_h_t": db_h_t, "db_Wy_t": d_Wy_t, "db_y_t": db_y_t}
         
         return gradients
 
+    def sequenceBackWard(self, sequence, sequence_memory):
+        n_timestep = len(sequence_memory)
+        for timestep in range(n_timestep-1, max(n_timestep - 1 - self._LAST_SEQUENCE_AMOUNT, 0), -1):
+                x = sequence[timestep].reshape(1,-1)
+                h_prev = sequence_memory[timestep]
+                forward_result = self.cellForward(x, h_prev)
+                #d_Y/d_b_Y = d_g/d_output * d_output/d_b_Y, y d_output/d_b_Y = 1, entonces:
+                #d_Y/d_b_Y = d_g(output) 
+                forward_output = forward_result['output'] 
+                dY_dBy_t = self.output_act_f[1](forward_output) 
+                #d_Y/d_W_Y = d_g/d_output * d_output/d_W_Y, entonces: 
+                #d_Y/d_W_Y = d_g/d_output * h_next_act = d_g(output) * h_next_act
+                forward_h_next_activation = forward_result['h_next_activation']
+                dY_dWy_t = forward_h_next_activation.T.dot(dY_dBy_t)
+                #d_Y/d_b_h = d_g/d_output * d_output/d_h_next_act * d_h_next_act/d_h_next * d_h_next/d_b_h,
+                # entonces, ya que d_h_next/d_b_h = 1
+                #d_Y/d_b_h = d_g/d_output * d_output/d_h_next_act * d_h_next_act/d_h_next
+                #d_Y/d_b_h = d_g/d_output * w_y * d_f(h_next)
+                forward_h_next = forward_result['h_next']
+                dF_dhNext_t = self.h_act_f[1](forward_h_next) #d_h_next_act/d_h_next = d_f(h_next)
+                dY_dHnextact_t = dY_dBy_t.dot(self.w_y.T)
+                dY_dbh_t = np.multiply(dY_dHnextact_t, dF_dhNext_t)  
+                #d_Y/d_Wx = d_g/d_output * d_output/d_h_next_act * d_h_next_act/d_h_next * d_h_next/d_W_x,
+                # entonces, ya que d_h_next/d_W_x = x
+                #d_Y/d_Wx = d_g/d_output * d_output/d_h_next_act * d_h_next_act/d_h_next * x
+                #d_Y/d_Wx = d_g/d_output * w_y * d_f(h_next) * x
+                dY_dWx_t = x.T.dot(dY_dbh_t)
+                #d_Y/d_Wh = d_g/d_output * d_output/d_h_next_act * d_h_next_act/d_h_next * d_h_next/d_W_h,
+                #d_Y/d_Wx = d_g/d_output * w_y * d_f(h_next) * d_h_next/d_W_h
+                #d_Y/d_Wx = d_g/d_output * w_y * d_f(h_next) * h_prev,
+                #pero a su vez h_prev depende de Wh_prev, es decir Wh_{t-1},  y asi sucesivamente.
+                #Como h_prev = f(x * Wx + Wh * h_prev_prevact + bh), entonces:
+                # dh_prev/dWh = d_f(x * Wx + Wh * h_prev_prevact + bh) * h_prev_prevact, y asi sucesivamente
+                dY_dWh = np.multiply(dY_dbh_t, h_prev)
+                dY_dWh_acumulador = np.zeros_like(dY_dWh)
+                for it in range(timestep-1, -1, -1):
+                    previous_h_next = sequence_memory[it]
+                    previous_result = self.cellForward(sequence[it].reshape(1,-1), previous_h_next)
+                    _temp = np.multiply(self.h_act_f[1](previous_result['h_next']), previous_h_next)
+                    dY_dWh_acumulador += _temp
+                dY_dWh = np.multiply(dY_dWh, dY_dWh_acumulador)
+                break
+
+        return {
+            "dY_dBy_t" : dY_dBy_t,
+            "dY_dWy_t" : dY_dWy_t,
+            "dY_dbh_t" : dY_dbh_t,
+            "dY_dWx_t" : dY_dWx_t,
+            "dY_dWh" : dY_dWh,
+        }
+
+
+
     def backward(self, output_gradient, learning_rate):
-        dW_h, dw_x, dw_y = np.zeros_like(self.W_h), np.zeros_like(self.w_x), np.zeros_like(self.w_y)
-        db_h, db_y = np.zeros_like(self.b_h), np.zeros_like(self.b_y)
-
-        count = 0
         n_sequences = len(self.memory)
+        w_x = np.zeros((self.input.shape[0], self.w_x.shape[0],  self.w_x.shape[1]))
+        W_h = np.zeros((self.input.shape[0], self.W_h.shape[0],  self.W_h.shape[1]))
+        w_y = np.zeros((self.input.shape[0], self.w_y.shape[0],  self.w_y.shape[1]))
+        b_h = np.zeros((self.input.shape[0], self.b_h.shape[0]))
+        b_y = np.zeros((self.input.shape[0], self.b_y.shape[0]))
+
         for i in range(n_sequences):
-            n_instances = len(self.memory[i])
-            for timestamp in range(n_instances-1, max(n_instances - 1 - self._LAST_SEQUENCE_AMOUNT, 0), -1):
-                x = self.input[i][timestamp]
-                output = self.memory[i][timestamp]['output']
-                h_next_activation = self.memory[i][timestamp]['h_next_activation']
-                h_next = self.memory[i][timestamp]['h_next']
-                h_prev = self.memory[i][timestamp]['h_prev']
-                #Acumulando los gradientes
-                db_y_i = self.output_act_f[1](output)
-                db_Wy_i = self.output_act_f[1](output) * h_next_activation
-
-
-                da_next = self.output_act_f[1](output)
-                gradients = self.cellBackward(da_next, h_next, h_prev, x)
-                dxt, da_prevt, dWaxt, dWaat, dbat = gradients["dxt"], gradients["da_prev"], gradients["dWax"], gradients["dWaa"], gradients["dba"]
-                # Increment global derivatives w.r.t parameters by adding their derivative at time-step t (≈4 lines)
-                dW_h = gradients["dWh"]
-                dw_x = gradients["dWx"]
-                db_h = gradients["dbh"]
-                
-                count += 1
-
-        #dW_h, dw_x, dw_y, db_h, db_y = dW_h/count, dw_x/count, dw_y/count, db_h/count, db_y/count
-
-        self.w_x -= (dw_x * learning_rate * output_gradient)
-        self.W_h -= (dW_h * learning_rate * output_gradient)
-        self.w_y -= (dw_y * learning_rate * output_gradient)
-        self.b_h -= (db_h * learning_rate * output_gradient)
-        self.b_y -= (db_y * learning_rate * output_gradient)
+            gradients = self.sequenceBackWard(self.input[i], self.memory[i])
+            w_x[i,:,:] = gradients['dY_dWx_t']
+            W_h[i,:,:] = gradients['dY_dWh']
+            w_y[i,:,:] = gradients['dY_dWy_t']
+            b_h[i,:] = gradients['dY_dbh_t'].reshape(self.b_h.shape)
+            b_y[i,:] = gradients['dY_dBy_t'].reshape(self.b_y.shape)
+            
+            
+        #output_gradient = output_gradient.reshape((output_gradient.shape[0],1, output_gradient.shape[1]))
+        self.w_x -= (w_x * learning_rate * output_gradient)
+        self.W_h -= (gradients['dY_dWh'] * learning_rate * output_gradient)
+        self.w_y -= (gradients['dY_dWy_t'] * learning_rate * output_gradient)
+        self.b_h -= (gradients['dY_dbh_t'].reshape(self.b_h.shape) * learning_rate * output_gradient)
+        self.b_y -= (gradients['dY_dBy_t'].reshape(self.b_y.shape) * learning_rate * output_gradient)    
 
         return 1
 
