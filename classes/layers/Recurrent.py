@@ -143,27 +143,30 @@ class Recurrent(Layer):
 
     def backward(self, output_gradient, learning_rate):
         n_sequences = len(self.memory)
-        w_x = np.zeros((self.input.shape[0], self.w_x.shape[0],  self.w_x.shape[1]))
-        W_h = np.zeros((self.input.shape[0], self.W_h.shape[0],  self.W_h.shape[1]))
-        w_y = np.zeros((self.input.shape[0], self.w_y.shape[0],  self.w_y.shape[1]))
-        b_h = np.zeros((self.input.shape[0], self.b_h.shape[0]))
-        b_y = np.zeros((self.input.shape[0], self.b_y.shape[0]))
-
+        w_x = np.zeros_like(self.w_x)
+        W_h = np.zeros_like(self.W_h)
+        w_y = np.zeros_like(self.w_y)
+        b_h = np.zeros_like(self.b_h)
+        b_y = np.zeros_like(self.b_y)
         for i in range(n_sequences):
             gradients = self.sequenceBackWard(self.input[i], self.memory[i])
-            w_x[i,:,:] = gradients['dY_dWx_t']
-            W_h[i,:,:] = gradients['dY_dWh']
-            w_y[i,:,:] = gradients['dY_dWy_t']
-            b_h[i,:] = gradients['dY_dbh_t'].reshape(self.b_h.shape)
-            b_y[i,:] = gradients['dY_dBy_t'].reshape(self.b_y.shape)
-            
-            
-        #output_gradient = output_gradient.reshape((output_gradient.shape[0],1, output_gradient.shape[1]))
-        self.w_x -= (w_x * learning_rate * output_gradient)
-        self.W_h -= (gradients['dY_dWh'] * learning_rate * output_gradient)
-        self.w_y -= (gradients['dY_dWy_t'] * learning_rate * output_gradient)
-        self.b_h -= (gradients['dY_dbh_t'].reshape(self.b_h.shape) * learning_rate * output_gradient)
-        self.b_y -= (gradients['dY_dBy_t'].reshape(self.b_y.shape) * learning_rate * output_gradient)    
+            w_x += gradients['dY_dWx_t'] * output_gradient[i]
+            W_h += gradients['dY_dWh'] * output_gradient[i]
+            w_y += gradients['dY_dWy_t'] * output_gradient[i]
+            b_h += gradients['dY_dbh_t'].reshape(self.b_h.shape) * output_gradient[i]
+            b_y += gradients['dY_dBy_t'].reshape(self.b_y.shape) * output_gradient[i]
+        
+        w_x/=n_sequences
+        W_h/=n_sequences
+        w_y/=n_sequences
+        b_h/=n_sequences
+        b_y/=n_sequences
+
+        self.w_x -= w_x * learning_rate
+        self.W_h -= W_h * learning_rate
+        self.w_y -= w_y * learning_rate
+        self.b_h -= b_h * learning_rate
+        self.b_y -= b_y * learning_rate 
 
         return 1
 

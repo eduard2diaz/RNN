@@ -26,4 +26,4 @@ from classes.functions import *
 
 net = Network()
 net.appendLayer(Recurrent(2, linear, linear))
-net.train(X, Y, l2_cost, lr=.02, epochs= 1000)
+net.train(X, Y, l2_cost, lr=.7, epochs= 1000)
