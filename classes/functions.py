@@ -2,7 +2,7 @@ import numpy as np
 
 #Definiendo la funcion de activacion linear y su derivada
 linear = (lambda x: x,
-          lambda x: x)
+          lambda x: np.ones_like(x))
 
 #Definiendo la funcion de activacion tangente hiperbolica y su derivada
 def tanhTemplate(x):

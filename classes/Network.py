@@ -40,7 +40,7 @@ class Network:
 
         return out[-1][1]
 
-    def train(self, X, y, cost_function, lr=.5, epochs=1000, error_range=.2):
+    def train(self, X, y, cost_function, lr=.5, epochs=1000, error_range=.0000002):
         i = 0
         cost = 1
         while i < epochs and cost > error_range:
