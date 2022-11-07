@@ -2,7 +2,7 @@ from classes.layers.Layer import Layer
 import numpy as np
 
 class Recurrent(Layer):
-    _LAST_SEQUENCE_AMOUNT = 1
+    _LAST_SEQUENCE_AMOUNT = 5
 
     def __init__(self, hidden_units, h_act_f, output_act_f, n_outputs = 1):
         """
@@ -24,8 +24,8 @@ class Recurrent(Layer):
     def cellForward(self, x, h_prev):
         h_next = self.nextContext(x, h_prev)
         h_next_activation = self.h_act_f[0](h_next)
-        #output = g(h_next * W_y + b_y)
-        output = np.dot(h_next_activation, self.w_y) + self.b_y
+        #output = g(h_next_act * W_y + b_y)
+        output = np.dot(h_next_activation, self.w_y) + self.b_y 
         output_activation = self.output_act_f[0](output)
         return {
                     'h_prev': h_prev,
@@ -59,6 +59,7 @@ class Recurrent(Layer):
 
     def cellPartialBackward(self, x, h_prev, da_next):
         dF_dhNext = self.h_act_f[1](self.nextContext(x, h_prev)) #d_h_next_act/d_h_next = d_f(h_next)
+
         dF_dbh = np.multiply(da_next, dF_dhNext)  
         #d_Y/d_Wx = d_g/d_output * d_output/d_h_next_act * d_h_next_act/d_h_next * d_h_next/d_W_x,
         # entonces, ya que d_h_next/d_W_x = x
@@ -72,16 +73,15 @@ class Recurrent(Layer):
         #pero a su vez h_prev depende de Wh_prev, es decir Wh_{t-1},  y asi sucesivamente.
         #Como h_prev = f(x * Wx + Wh * h_prev_prevact + bh), entonces:
         # dh_prev/dWh = d_f(x_prev * Wx + Wh * h_prev_prevact + bh) * h_prev_prevact, y asi sucesivamente
-        dF_dh = np.multiply(dF_dbh, self.W_h)
+        dF_dh = np.dot(dF_dbh, self.W_h)
 
-        return {"dbh": dF_dbh, "dWx": dF_dWx, "dWh": dF_dWh, "dh": dF_dh}
+        return {"dbh" : dF_dbh, "dWx" : dF_dWx, "dWh" : dF_dWh, "dh" : dF_dh}
 
-    def cellBackward(self, x, h_prev):
+    def lastCellBackward(self, x, h_prev, output_gradient):
         parameters = self.cellForward(x, h_prev)
-        
         #d_Y/d_b_Y = d_g/d_output * d_output/d_b_Y, y d_output/d_b_Y = 1, entonces:
         #d_Y/d_b_Y = d_g(output)
-        dY_dBy = self.output_act_f[1](parameters['output'])
+        dY_dBy = self.output_act_f[1](parameters['output']) * output_gradient
         #d_Y/d_W_Y = d_g/d_output * d_output/d_W_Y, entonces: 
         #d_Y/d_W_Y = d_g/d_output * h_next_act = d_g(output) * h_next_act
         dY_dWy = parameters['h_next_activation'].T.dot(dY_dBy)
@@ -93,53 +93,65 @@ class Recurrent(Layer):
          "dY_dWx": partial_gradients['dWx'], "dY_dWh": partial_gradients['dWh'],
          "dY_dh": partial_gradients['dh']}
         
-    def sequenceBackWard(self, sequence, sequence_memory):
+    def sequenceBackward(self, sequence, sequence_memory, output_gradient):
         n_timestep = len(sequence_memory)
-        last_cell_gradient = self.cellBackward(sequence[n_timestep-1].reshape(1,-1), sequence_memory[n_timestep-1])
-        dWh =last_cell_gradient["dY_dWh"]
+        last_cell_gradient = self.lastCellBackward(sequence[n_timestep-1].reshape(1,-1),
+        sequence_memory[n_timestep-1], output_gradient)
 
-        da_next = last_cell_gradient["dY_dWh"]
+        dWh_acum = last_cell_gradient["dY_dWh"]
+        da_next = last_cell_gradient["dY_dh"]
+
         for timestep in range(n_timestep-2, max(n_timestep - 2 - self._LAST_SEQUENCE_AMOUNT, -1), -1):
+                #Obteniendo la derivada de la salida final respecto a los pesos de los contextos para las
+                #_LAST_SEQUENCE_AMOUNT ultimas capas predecesoras a la ultima capa de la RNN.
                 partial_grads= self.cellPartialBackward(sequence[timestep].reshape(1,-1), 
                 sequence_memory[timestep], da_next)
-
+                dWh_acum+= partial_grads["dWh"]
                 da_next = partial_grads['dh']
 
-                dWh+= np.multiply(partial_grads["dY_dWh"], partial_grads['dh'])
+        last_cell_gradient["dY_dWh"] = dWh_acum
 
-        last_cell_gradient["dY_dWh"] = dWh
-
-        return last_cell_gradient
+        #We return da_next in case of exist other kind of layer, no RNN,
+        #and this way we can update its parameters
+        return last_cell_gradient, da_next
 
     def backward(self, output_gradient, learning_rate):
         n_sequences = len(self.memory)
-        w_x = np.zeros_like(self.w_x)
-        W_h = np.zeros_like(self.W_h)
-        w_y = np.zeros_like(self.w_y)
-        b_h = np.zeros_like(self.b_h)
-        b_y = np.zeros_like(self.b_y)
+        dw_x = np.zeros_like(self.w_x)
+        dW_h = np.zeros_like(self.W_h)
+        dw_y = np.zeros_like(self.w_y)
+        db_h = np.zeros_like(self.b_h)
+        db_y = np.zeros_like(self.b_y)
+        dh_prev = np.zeros_like(self.head_prev)
+
         for i in range(n_sequences):
-            gradients = self.sequenceBackWard(self.input[i], self.memory[i])
-            w_x += gradients['dY_dWx'] * output_gradient[i]
-            W_h += gradients['dY_dWh'] * output_gradient[i]
-            w_y += gradients['dY_dWy'] * output_gradient[i]
-            b_h += gradients['dY_dbh'].reshape(self.b_h.shape) * output_gradient[i]
-            b_y += gradients['dY_dBy'].reshape(self.b_y.shape) * output_gradient[i]
+            #Backpropagation through sequences
+            gradients, da_next = self.sequenceBackward(self.input[i], self.memory[i], output_gradient[i])
+            #Acumalating gradients of the sequences
+            dw_x += gradients['dY_dWx']
+            dW_h += gradients['dY_dWh']
+            dw_y += gradients['dY_dWy']
+            db_h += gradients['dY_dbh'].reshape(self.b_h.shape)
+            db_y += gradients['dY_dBy'].reshape(self.b_y.shape)
+            dh_prev += da_next
         
-        
-        w_x/=n_sequences
-        W_h/=n_sequences
-        w_y/=n_sequences
-        b_h/=n_sequences
-        b_y/=n_sequences
+        #Averaging gotten gradients through sequences
+        dw_x/=n_sequences
+        dW_h/=n_sequences
+        dw_y/=n_sequences
+        db_h/=n_sequences
+        db_y/=n_sequences
+        dh_prev/= n_sequences
 
-        self.w_x -= w_x * learning_rate
-        self.W_h -= W_h * learning_rate
-        self.w_y -= w_y * learning_rate
-        self.b_h -= b_h * learning_rate
-        self.b_y -= b_y * learning_rate 
+        #Gradient descent
+        self.w_x -= dw_x * learning_rate
+        self.W_h -= dW_h * learning_rate
+        self.w_y -= dw_y * learning_rate
+        self.b_h -= db_h * learning_rate
+        self.b_y -= db_y * learning_rate 
 
-        return 1
+        return dh_prev
 
     def __str__(self):
-        return f"RecurrentLayer(W_h: {self.W_h.shape}, b_h: {self.b_h.shape}, w_x: {self.w_x.shape}, w_y: {self.w_y.shape})"
+        return f"RecurrentLayer(W_h: {self.W_h.shape},\
+             b_h: {self.b_h.shape}, w_x: {self.w_x.shape}, w_y: {self.w_y.shape})"

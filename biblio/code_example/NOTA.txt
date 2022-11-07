@@ -1,0 +1,2 @@
+Estos ejemplos fueron tomados del respositorio de github del autor de
+https://pythonalgos.com/build-a-recurrent-neural-network-from-scratch-in-python-3/
