@@ -3,6 +3,8 @@ import numpy as np
 
 class Recurrent(Layer):
     _LAST_SEQUENCE_AMOUNT = 5
+    _MAX_CLIP_VAL = 7
+    _MIN_CLIP_VAL = -7
 
     def __init__(self, hidden_units, h_act_f, output_act_f, n_outputs = 1):
         """
@@ -18,15 +20,18 @@ class Recurrent(Layer):
         self.w_y = np.random.rand(hidden_units, n_outputs) * 2 - 1
 
     def nextContext(self, x, h_prev):
-        #h_next_act = f(x * w_x + h_prev * W_h + b_h)
+        #h_next = x * w_x + h_prev * W_h + b_h
         return np.dot(x, self.w_x) +  np.dot(h_prev, self.W_h) + self.b_h
 
     def cellForward(self, x, h_prev):
         h_next = self.nextContext(x, h_prev)
+        #h_next_act = f(x * w_x + h_prev * W_h + b_h) = f(h_next)
         h_next_activation = self.h_act_f[0](h_next)
-        #output = g(h_next_act * W_y + b_y)
+        #output = h_next_act * W_y + b_y
         output = np.dot(h_next_activation, self.w_y) + self.b_y 
+        #output_activation = g(h_next_act * W_y + b_y) = g(output)
         output_activation = self.output_act_f[0](output)
+
         return {
                     'h_prev': h_prev,
                     'h_next': h_next,
@@ -59,7 +64,6 @@ class Recurrent(Layer):
 
     def cellPartialBackward(self, x, h_prev, da_next):
         dF_dhNext = self.h_act_f[1](self.nextContext(x, h_prev)) #d_h_next_act/d_h_next = d_f(h_next)
-
         dF_dbh = np.multiply(da_next, dF_dhNext)  
         #d_Y/d_Wx = d_g/d_output * d_output/d_h_next_act * d_h_next_act/d_h_next * d_h_next/d_W_x,
         # entonces, ya que d_h_next/d_W_x = x
@@ -73,6 +77,10 @@ class Recurrent(Layer):
         #pero a su vez h_prev depende de Wh_prev, es decir Wh_{t-1},  y asi sucesivamente.
         #Como h_prev = f(x * Wx + Wh * h_prev_prevact + bh), entonces:
         # dh_prev/dWh = d_f(x_prev * Wx + Wh * h_prev_prevact + bh) * h_prev_prevact, y asi sucesivamente
+
+        #Con este fin haremos uso de dF_dh el cual almacena la retropropagacion del error con respecto a h_prev
+        #desde la evaluacion de la funcion de costo hasta la capa actual y sera lo que le pasaremos a la capa
+        # anterior para que calcule su correspondiente dF_dWh
         dF_dh = np.dot(dF_dbh, self.W_h)
 
         return {"dbh" : dF_dbh, "dWx" : dF_dWx, "dWh" : dF_dWh, "dh" : dF_dh}
@@ -115,6 +123,15 @@ class Recurrent(Layer):
         #and this way we can update its parameters
         return last_cell_gradient, da_next
 
+    def gradientClipping(self, value):
+        if value.max() > self._MAX_CLIP_VAL:
+            value[value > self._MAX_CLIP_VAL] = self._MAX_CLIP_VAL
+        
+        if value.min() < self._MIN_CLIP_VAL:
+            value[value < self._MIN_CLIP_VAL] = self._MIN_CLIP_VAL
+        
+        return value 
+
     def backward(self, output_gradient, learning_rate):
         n_sequences = len(self.memory)
         dw_x = np.zeros_like(self.w_x)
@@ -142,6 +159,13 @@ class Recurrent(Layer):
         db_h/=n_sequences
         db_y/=n_sequences
         dh_prev/= n_sequences
+
+        #Applying gradient clipping
+        dw_x = self.gradientClipping(dw_x)
+        dW_h = self.gradientClipping(dW_h)
+        dw_y = self.gradientClipping(dw_y)
+        db_h = self.gradientClipping(db_h)
+        db_y = self.gradientClipping(db_y)
 
         #Gradient descent
         self.w_x -= dw_x * learning_rate

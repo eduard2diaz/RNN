@@ -3,9 +3,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import math
 
-sin_wave = np.array([math.sin(x) for x in range(20)])#200
+sin_wave = np.array([math.sin(x) for x in range(200)])
 
-seq_len = 5 #50
+seq_len = 50
 X = []
 Y = []
 num_records = len(sin_wave) - seq_len # 150
