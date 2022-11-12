@@ -21,9 +21,11 @@ Y = np.expand_dims(np.array(Y), axis=1) # 100 x 1
 #print(f"X.shape {X.shape} Y.shape {Y.shape}")
 
 from classes.layers.Recurrent import Recurrent
+from classes.layers.Dense import Dense
 from classes.Network import Network
 from classes.functions import *
 
 net = Network()
-net.appendLayer(Recurrent(2, linear, linear))
-net.train(X, Y, l2_cost, lr=.07, epochs= 1000, error_range= 2e-4)
+net.appendLayer(Recurrent(2, linear))
+net.appendLayer(Dense(1, linear))
+net.train(X, Y, l2_cost, lr=.07, error_range= 2e-4)
