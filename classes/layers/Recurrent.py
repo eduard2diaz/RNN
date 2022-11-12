@@ -2,7 +2,7 @@ from classes.layers.Layer import Layer
 import numpy as np
 
 class Recurrent(Layer):
-    _LAST_SEQUENCE_AMOUNT = 1
+    _LAST_SEQUENCE_AMOUNT = 5
     _MAX_CLIP_VAL = 7
     _MIN_CLIP_VAL = -7
 
