@@ -2,7 +2,7 @@ from classes.layers.Layer import Layer
 import numpy as np
 
 class Recurrent(Layer):
-    _LAST_SEQUENCE_AMOUNT = 5
+    _LAST_SEQUENCE_AMOUNT = 1
     _MAX_CLIP_VAL = 7
     _MIN_CLIP_VAL = -7
 
@@ -45,7 +45,9 @@ class Recurrent(Layer):
                 x = X[i][timestep]
                 result = self.cellForward(x, h_prev)
                 temp_memory.append(result['h_prev']) 
-                out[i,:] = result['h_next_activation']               
+                h_prev = result['h_next_activation']
+                if timestep == X[i].shape[0] - 1 :
+                    out[i,:] = result['h_next_activation']               
             memory.append(temp_memory)
         self.memory = memory
         return out
@@ -53,14 +55,14 @@ class Recurrent(Layer):
     def cellBackward(self, x, h_prev, da_next):
         dF_dhNext = self.h_act_f[1](self.nextContext(x, h_prev)) #d_h_next_act/d_h_next = d_f(h_next)
         dF_dbh = np.multiply(da_next, dF_dhNext)  
-        #d_Y/d_Wx = d_g/d_output * d_output/d_h_next_act * d_h_next_act/d_h_next * d_h_next/d_W_x,
+        #d_h_next_act/d_Wx = d_h_next_act/d_h_next * d_h_next/d_W_x,
         # entonces, ya que d_h_next/d_W_x = x
-        #d_Y/d_Wx = d_g/d_output * d_output/d_h_next_act * d_h_next_act/d_h_next * x
-        #d_Y/d_Wx = d_g/d_output * w_y * d_f(h_next) * x
+        #d_h_next_act/d_Wx = d_h_next_act/d_h_next * x
+        #d_h_next_act/d_Wx = d_f(h_next) * x
         dF_dWx = x.T.dot(dF_dbh)
-        #d_Y/d_Wh = d_g/d_output * d_output/d_h_next_act * d_h_next_act/d_h_next * d_h_next/d_W_h,
-        #d_Y/d_Wx = d_g/d_output * w_y * d_f(h_next) * d_h_next/d_W_h
-        #d_Y/d_Wx = d_g/d_output * w_y * d_f(h_next) * h_prev,
+        #d_h_next_act/d_Wh = d_h_next_act/d_h_next * d_h_next/d_W_h,
+        #d_h_next_act/d_Wx = d_f(h_next) * d_h_next/d_W_h
+        #d_h_next_act/d_Wx = d_f(h_next) * h_prev,
         dF_dWh = np.multiply(dF_dbh, h_prev)
         #pero a su vez h_prev depende de Wh_prev, es decir Wh_{t-1},  y asi sucesivamente.
         #Como h_prev = f(x * Wx + Wh * h_prev_prevact + bh), entonces:
