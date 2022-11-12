@@ -84,11 +84,13 @@ class Recurrent(Layer):
             partial_grads = self.cellBackward(sequence[timestep].reshape(1,-1),
             sequence_memory[timestep], output_gradient)
 
+            #Applying gradient clipping
             partial_grads["dWx"] = self.gradientClipping(partial_grads["dWx"])
             partial_grads["dWh"] = self.gradientClipping(partial_grads["dWh"])
             partial_grads["dbh"] = self.gradientClipping(partial_grads["dbh"])
             partial_grads['dh'] = self.gradientClipping(partial_grads['dh'])
 
+            #Adding respective gradients
             dW_x+= partial_grads["dWx"]
             dW_h+= partial_grads["dWh"]
             db_h+= partial_grads["dbh"].reshape(db_h.shape)
@@ -130,11 +132,6 @@ class Recurrent(Layer):
         dW_h/=n_sequences
         db_h/=n_sequences
         dh_prev/= n_sequences
-
-        #Applying gradient clipping
-        dw_x = self.gradientClipping(dw_x)
-        dW_h = self.gradientClipping(dW_h)
-        db_h = self.gradientClipping(db_h)
 
         #Gradient descent
         self.w_x -= dw_x * learning_rate
